@@ -1,0 +1,8 @@
+{
+  "domain": "aseag_next_bus",
+  "name": "ASEAG Next Bus Sensor",
+  "documentation": "",
+  "dependencies": [],
+  "codeowners": ["@davidorlea"],
+  "requirements": []
+}
