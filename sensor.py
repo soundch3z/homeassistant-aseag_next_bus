@@ -1,8 +1,7 @@
+import homeassistant.helpers.config_validation as cv
 import json
 import logging
 import voluptuous as vol
-
-import homeassistant.helpers.config_validation as cv
 
 from homeassistant.components.sensor import PLATFORM_SCHEMA
 from homeassistant.components.rest.sensor import RestData
@@ -10,7 +9,9 @@ from homeassistant.const import (
     ATTR_ATTRIBUTION, CONF_NAME, DEVICE_CLASS_TIMESTAMP
 )
 from homeassistant.helpers.entity import Entity
-from homeassistant.util.dt import utc_from_timestamp
+from homeassistant.util.dt import (
+    utc_from_timestamp, utcnow
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
     direction_id = config[CONF_DIRECTION_ID]
     name = config.get(CONF_NAME)
 
-    url = 'http://ivu.aseag.de/interfaces/ura/instant_V2?StopId={}&DirectionID={}&ReturnList=stoppointname,linename,destinationtext,estimatedtime'
+    url = 'http://ivu.aseag.de/interfaces/ura/instant_V2?StopId={}&DirectionID={}&ReturnList=stoppointname,linename,destinationtext,tripid,estimatedtime'
     endpoint = url.format(stop_id, direction_id)
     rest = RestData('GET', endpoint, None, None, None, True)
 
@@ -54,6 +55,7 @@ class AseagNextBusSensor(Entity):
         self._name = name
         self._stop_id = stop_id
         self._direction_id = direction_id
+        self._predictions = []
         self._state = None
         self._attributes = {}
 
@@ -84,29 +86,35 @@ class AseagNextBusSensor(Entity):
 
     def update(self):
         """Fetch new state data for the ASEAG Next Bus Sensor."""
+        self._state = None
+        self._attributes = {}
+
         self.rest.update()
-        value = self.rest.data
+        result = self.rest.data
+        predictions = []
 
-        if value:
-            self._state = None
-            self._attributes = {}
-            predictions = []
-
-            for line in value.splitlines():
+        if result:
+            for line in result.splitlines():
                 try:
                     line_list = json.loads(line)
                     if (line_list[0] == 1):
-                        predictions.append([line_list[4], line_list[1], line_list[2], line_list[3]])
+                        # prediction: [tripid, estimatedtime, stoppointname, linename, destinationtext]
+                        predictions.append([line_list[4], utc_from_timestamp(int(line_list[5] / 1000)), line_list[1], line_list[2], line_list[3]])
                 except ValueError:
                     _LOGGER.warning("REST result could not be parsed as JSON")
-                    _LOGGER.debug("Erroneous JSON: %s", value)
-
-            if predictions:
-                predictions.sort(key=lambda prediction: prediction[0])
-                self._state = utc_from_timestamp(int(predictions[0][0]) / 1000).isoformat()
-                self._attributes[ATTR_STOP] = predictions[0][1]
-                self._attributes[ATTR_LINE] = predictions[0][2]
-                self._attributes[ATTR_DESTINATION] = predictions[0][3]
-                self._attributes[ATTR_ATTRIBUTION] = ATTRIBUTION
+                    _LOGGER.debug("Erroneous JSON: %s", line)
         else:
             _LOGGER.warning("Empty reply found when expecting JSON data")
+
+        for p in self._predictions:
+            if not any(p[0] in subl for subl in predictions) and p[1] > utcnow():
+                predictions.append(p)
+                _LOGGER.debug("Using old prediction: %s", p)
+
+        if predictions:
+            self._predictions = sorted(predictions, key=lambda prediction: prediction[1])
+            self._state = self._predictions[0][1].isoformat()
+            self._attributes[ATTR_STOP] = self._predictions[0][2]
+            self._attributes[ATTR_LINE] = self._predictions[0][3]
+            self._attributes[ATTR_DESTINATION] = self._predictions[0][4]
+            self._attributes[ATTR_ATTRIBUTION] = ATTRIBUTION
