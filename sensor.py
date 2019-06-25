@@ -40,7 +40,7 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
     direction_id = config[CONF_DIRECTION_ID]
     name = config.get(CONF_NAME)
 
-    url = 'http://ivu.aseag.de/interfaces/ura/instant_V2?StopId={}&DirectionID={}&ReturnList=stoppointname,linename,destinationtext,tripid,estimatedtime'
+    url = 'http://ivu.aseag.de/interfaces/ura/instant_V2?StopId={}&DirectionID={}&ReturnList=stoppointname,linename,destinationtext,tripid,estimatedtime,expiretime'
     endpoint = url.format(stop_id, direction_id)
     rest = RestData('GET', endpoint, None, None, None, True)
 
@@ -98,8 +98,13 @@ class AseagNextBusSensor(Entity):
                 try:
                     line_list = json.loads(line)
                     if (line_list[0] == 1):
-                        # prediction: [tripid, estimatedtime, stoppointname, linename, destinationtext]
-                        predictions.append([line_list[4], utc_from_timestamp(int(line_list[5] / 1000)), line_list[1], line_list[2], line_list[3]])
+                        trip_id = line_list[4]
+                        expire_time = utc_from_timestamp(int(line_list[6] / 1000))
+                        estimated_time = utc_from_timestamp(int(line_list[5] / 1000))
+                        stoppoint_name = line_list[1]
+                        line_name = line_list[2]
+                        destination_text = line_list[3]
+                        predictions.append([trip_id, expire_time, estimated_time, stoppoint_name, line_name, destination_text])
                 except ValueError:
                     _LOGGER.warning("REST result could not be parsed as JSON")
                     _LOGGER.debug("Erroneous JSON: %s", line)
@@ -107,14 +112,14 @@ class AseagNextBusSensor(Entity):
             _LOGGER.warning("Empty reply found when expecting JSON data")
 
         for p in self._predictions:
-            if not any(p[0] in subl for subl in predictions) and p[1] > utcnow():
+            if not any(p[0] in subl for subl in predictions) and p[1] > utcnow() and p[2] > utcnow():
                 predictions.append(p)
                 _LOGGER.debug("Using old prediction: %s", p)
 
         if predictions:
             self._predictions = sorted(predictions, key=lambda prediction: prediction[1])
-            self._state = self._predictions[0][1].isoformat()
-            self._attributes[ATTR_STOP] = self._predictions[0][2]
-            self._attributes[ATTR_LINE] = self._predictions[0][3]
-            self._attributes[ATTR_DESTINATION] = self._predictions[0][4]
+            self._state = self._predictions[0][2].isoformat()
+            self._attributes[ATTR_STOP] = self._predictions[0][3]
+            self._attributes[ATTR_LINE] = self._predictions[0][4]
+            self._attributes[ATTR_DESTINATION] = self._predictions[0][5]
             self._attributes[ATTR_ATTRIBUTION] = ATTRIBUTION
