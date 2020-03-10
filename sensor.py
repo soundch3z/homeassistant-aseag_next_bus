@@ -3,9 +3,9 @@
 import json
 import logging
 
+import requests
 import voluptuous as vol
 
-from homeassistant.components.rest.sensor import RestData
 from homeassistant.components.sensor import PLATFORM_SCHEMA
 from homeassistant.const import ATTR_ATTRIBUTION, CONF_NAME, DEVICE_CLASS_TIMESTAMP
 import homeassistant.helpers.config_validation as cv
@@ -42,24 +42,37 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
     direction_id = config[CONF_DIRECTION_ID]
     name = config.get(CONF_NAME)
 
-    url = (
-        "http://ivu.aseag.de/interfaces/ura/instant_V2"
-        "?StopId={}"
-        "&DirectionID={}"
-        "&ReturnList=stoppointname,linename,destinationtext,tripid,estimatedtime,expiretime"
-    )
-    endpoint = url.format(stop_id, direction_id)
-    rest = RestData("GET", endpoint, None, None, None, True)
+    api = AseagApi()
+    add_entities([AseagNextBusSensor(api, name, stop_id, direction_id)])
 
-    add_entities([AseagNextBusSensor(rest, name, stop_id, direction_id)])
+
+class AseagApi:
+    """Representation of the ASEAG API."""
+
+    @staticmethod
+    def get_predictions(stop_id, direction_id):
+        """Get predictions matching a stop and direction from the ASEAG API."""
+        resource = (
+            f"http://ivu.aseag.de/interfaces/ura/instant_V2"
+            f"?StopId={stop_id}"
+            f"&DirectionID={direction_id}"
+            f"&ReturnList=stoppointname,linename,destinationtext,tripid,estimatedtime,expiretime"
+        )
+        try:
+            response = requests.get(resource, verify=True, timeout=10)
+            response.raise_for_status()
+            return response.text
+        except requests.exceptions.RequestException as ex:
+            _LOGGER.error("Error fetching data: %s failed with %s", resource, ex)
+            return None
 
 
 class AseagNextBusSensor(Entity):
     """Representation of a ASEAG Next Bus Sensor."""
 
-    def __init__(self, rest, name, stop_id, direction_id):
+    def __init__(self, api, name, stop_id, direction_id):
         """Initialize the ASEAG Next Bus Sensor."""
-        self.rest = rest
+        self._api = api
         self._name = name
         self._stop_id = stop_id
         self._direction_id = direction_id
@@ -70,7 +83,7 @@ class AseagNextBusSensor(Entity):
     @property
     def name(self):
         """Return the name of the ASEAG Next Bus Sensor."""
-        return "{} {} {}".format(self._name, self._stop_id, self._direction_id)
+        return f"{self._name} {self._stop_id} {self._direction_id}"
 
     @property
     def device_class(self):
@@ -97,45 +110,42 @@ class AseagNextBusSensor(Entity):
         self._state = None
         self._attributes = {}
 
-        self.rest.update()
-        result = self.rest.data
+        result = self._api.get_predictions(self._stop_id, self._direction_id)
         predictions = []
 
         if result:
-            for line in result.splitlines():
-                try:
+            try:
+                for line in result.splitlines():
                     line_list = json.loads(line)
                     if line_list[0] == 1:
-                        trip_id = line_list[4]
-                        expire_time = utc_from_timestamp(int(line_list[6] / 1000))
-                        estimated_time = utc_from_timestamp(int(line_list[5] / 1000))
-                        stoppoint_name = line_list[1]
-                        line_name = line_list[2]
-                        destination_text = line_list[3]
                         predictions.append(
                             [
-                                trip_id,
-                                expire_time,
-                                estimated_time,
-                                stoppoint_name,
-                                line_name,
-                                destination_text,
+                                line_list[4],  # trip_id
+                                utc_from_timestamp(
+                                    int(line_list[6] / 1000)
+                                ),  # expire_time
+                                utc_from_timestamp(
+                                    int(line_list[5] / 1000)
+                                ),  # estimated_time
+                                line_list[1],  # stoppoint_name
+                                line_list[2],  # line_name
+                                line_list[3],  # destination_text
                             ]
                         )
-                except ValueError:
-                    _LOGGER.warning("REST result could not be parsed as JSON")
-                    _LOGGER.debug("Erroneous JSON: %s", line)
+            except (IndexError, ValueError) as ex:
+                _LOGGER.error(
+                    "Erroneous result found when expecting list of predictions: %s", ex
+                )
         else:
-            _LOGGER.warning("Empty reply found when expecting JSON data")
+            _LOGGER.error("Empty result found when expecting list of predictions")
 
-        for p in self._predictions:
+        for prediction in self._predictions:
             if (
-                not any(p[0] in subl for subl in predictions)
-                and p[1] > utcnow()
-                and p[2] > utcnow()
+                not any(prediction[0] in subl for subl in predictions)
+                and prediction[1] > utcnow()
+                and prediction[2] > utcnow()
             ):
-                predictions.append(p)
-                _LOGGER.debug("Using old prediction: %s", p)
+                predictions.append(prediction)
 
         if predictions:
             self._predictions = sorted(

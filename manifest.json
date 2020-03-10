@@ -3,7 +3,6 @@
   "name": "ASEAG Next Bus Sensor",
   "documentation": "",
   "dependencies": [],
-  "after_dependencies": ["rest"],
   "codeowners": ["@davidorlea"],
   "requirements": []
 }
