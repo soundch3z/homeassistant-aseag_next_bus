@@ -140,12 +140,12 @@ class AseagNextBusSensor(Entity):
             _LOGGER.error("Empty result found when expecting list of predictions")
 
         for prediction in self._predictions:
-            if (
-                not any(prediction[0] in subl for subl in predictions)
-                and prediction[1] > utcnow()
-                and prediction[2] > utcnow()
-            ):
+            if not any(prediction[0] in subl for subl in predictions):
                 predictions.append(prediction)
+
+        for prediction in predictions:
+            if prediction[1] < utcnow() or prediction[2] < utcnow():
+                predictions.remove(prediction)
 
         if predictions:
             self._predictions = sorted(
