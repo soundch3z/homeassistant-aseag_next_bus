@@ -122,11 +122,11 @@ class AseagNextBusSensor(Entity):
                             [
                                 line_list[4],  # trip_id
                                 utc_from_timestamp(
-                                    int(line_list[6] / 1000)
-                                ),  # expire_time
-                                utc_from_timestamp(
                                     int(line_list[5] / 1000)
                                 ),  # estimated_time
+                                utc_from_timestamp(
+                                    int(line_list[6] / 1000)
+                                ),  # expire_time
                                 line_list[1],  # stoppoint_name
                                 line_list[2],  # line_name
                                 line_list[3],  # destination_text
@@ -151,7 +151,7 @@ class AseagNextBusSensor(Entity):
             self._predictions = sorted(
                 predictions, key=lambda prediction: prediction[1]
             )
-            self._state = self._predictions[0][2].isoformat()
+            self._state = self._predictions[0][1].isoformat()
             self._attributes[ATTR_STOP] = self._predictions[0][3]
             self._attributes[ATTR_LINE] = self._predictions[0][4]
             self._attributes[ATTR_DESTINATION] = self._predictions[0][5]
