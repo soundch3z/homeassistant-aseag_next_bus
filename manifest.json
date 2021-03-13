@@ -1,6 +1,7 @@
 {
   "domain": "aseag_next_bus",
   "name": "ASEAG Next Bus Sensor",
+  "version": "0.4.0",
   "documentation": "",
   "dependencies": [],
   "codeowners": ["@davidorlea"],
