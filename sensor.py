@@ -1,6 +1,5 @@
 """Representation of ASEAG Next Bus Sensors."""
 
-import json
 import logging
 
 import requests
@@ -15,11 +14,11 @@ from homeassistant.util.dt import utc_from_timestamp, utcnow
 _LOGGER = logging.getLogger(__name__)
 
 CONF_STOP_ID = "stop_id"
-CONF_DIRECTION_ID = "direction_id"
+CONF_TRACK = "track"
 
-ATTR_STOP = "stop"
 ATTR_LINE = "line"
 ATTR_DESTINATION = "destination"
+ATTR_DELAY = "delay"
 
 DEFAULT_NAME = "ASEAG Next Bus"
 
@@ -29,53 +28,52 @@ ATTRIBUTION = "Data provided by ASEAG"
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     {
         vol.Required(CONF_STOP_ID): cv.string,
-        vol.Required(CONF_DIRECTION_ID): cv.string,
+        vol.Required(CONF_TRACK): cv.string,
         vol.Optional(CONF_NAME, default=DEFAULT_NAME): cv.string,
     }
 )
 
 
-def setup_platform(hass, config, add_entities, discovery_info=None):
+def setup_platform(_1, config, add_entities, _2):
     """Set up the sensor platform."""
 
-    stop_id = config[CONF_STOP_ID]
-    direction_id = config[CONF_DIRECTION_ID]
+    stop_id = config.get(CONF_STOP_ID)
+    track = config.get(CONF_TRACK)
     name = config.get(CONF_NAME)
 
     api = AseagApi()
-    add_entities([AseagNextBusSensor(api, name, stop_id, direction_id)])
+    add_entities([AseagNextBusSensor(api, name, stop_id, track)])
 
 
 class AseagApi:
     """Representation of the ASEAG API."""
 
     @staticmethod
-    def get_predictions(stop_id, direction_id):
-        """Get predictions matching a stop and direction from the ASEAG API."""
-        resource = (
-            f"http://ivu.aseag.de/interfaces/ura/instant_V2"
-            f"?StopId={stop_id}"
-            f"&DirectionID={direction_id}"
-            f"&ReturnList=stoppointname,linename,destinationtext,tripid,estimatedtime,expiretime"
-        )
+    def get_predictions(stop_id):
+        """Get predictions matching a stop from the ASEAG API."""
+        headers = {"User-Agent": "curl/7.64.1"}
+        resource = f"https://mova.aseag.de/mbroker/rest/areainformation/{stop_id}"
         try:
-            response = requests.get(resource, verify=True, timeout=10)
+            response = requests.get(resource, headers=headers, verify=True, timeout=10)
             response.raise_for_status()
-            return response.text
+            return response.json()
         except requests.exceptions.RequestException as ex:
             _LOGGER.error("Error fetching data: %s failed with %s", resource, ex)
+            return None
+        except ValueError as ex:
+            _LOGGER.error("Error parsing data: %s failed with %s", resource, ex)
             return None
 
 
 class AseagNextBusSensor(Entity):
     """Representation of a ASEAG Next Bus Sensor."""
 
-    def __init__(self, api, name, stop_id, direction_id):
+    def __init__(self, api, name, stop_id, track):
         """Initialize the ASEAG Next Bus Sensor."""
         self._api = api
         self._name = name
         self._stop_id = stop_id
-        self._direction_id = direction_id
+        self._track = track
         self._predictions = []
         self._state = None
         self._attributes = {}
@@ -83,7 +81,7 @@ class AseagNextBusSensor(Entity):
     @property
     def name(self):
         """Return the name of the ASEAG Next Bus Sensor."""
-        return f"{self._name} {self._stop_id} {self._direction_id}"
+        return f"{self._name} {self._stop_id} {self._track}"
 
     @property
     def device_class(self):
@@ -110,49 +108,53 @@ class AseagNextBusSensor(Entity):
         self._state = None
         self._attributes = {}
 
-        result = self._api.get_predictions(self._stop_id, self._direction_id)
+        now = utcnow()
+        result = self._api.get_predictions(self._stop_id)
         predictions = []
 
         if result:
             try:
-                for line in result.splitlines():
-                    line_list = json.loads(line)
-                    if line_list[0] == 1:
-                        predictions.append(
-                            [
-                                line_list[4],  # trip_id
-                                utc_from_timestamp(
-                                    int(line_list[5] / 1000)
-                                ),  # estimated_time
-                                utc_from_timestamp(
-                                    int(line_list[6] / 1000)
-                                ),  # expire_time
-                                line_list[1],  # stoppoint_name
-                                line_list[2],  # line_name
-                                line_list[3],  # destination_text
-                            ]
-                        )
-            except (IndexError, ValueError) as ex:
+                predictions = [
+                    d["stopPrediction"] for d in result["departures"]["departures"]
+                ]
+            except KeyError as ex:
                 _LOGGER.error(
                     "Erroneous result found when expecting list of predictions: %s", ex
                 )
         else:
             _LOGGER.error("Empty result found when expecting list of predictions")
 
-        for prediction in self._predictions:
-            if not any(prediction[0] in subl for subl in predictions):
-                predictions.append(prediction)
+        for p in self._predictions:
+            if not any(p["tripId"] in subl.values() for subl in predictions):
+                predictions.append(p)
 
-        for prediction in predictions:
-            if prediction[1] < utcnow() or prediction[2] < utcnow():
-                predictions.remove(prediction)
+        for p in predictions:
+            if p["track"] != self._track or self.__get_prediction_time(p) < now:
+                predictions.remove(p)
 
         if predictions:
             self._predictions = sorted(
-                predictions, key=lambda prediction: prediction[1]
+                predictions,
+                key=lambda prediction: self.__get_prediction_time(prediction),
             )
-            self._state = self._predictions[0][1].isoformat()
-            self._attributes[ATTR_STOP] = self._predictions[0][3]
-            self._attributes[ATTR_LINE] = self._predictions[0][4]
-            self._attributes[ATTR_DESTINATION] = self._predictions[0][5]
+            self._state = self.__get_prediction_time(self._predictions[0]).isoformat()
+            self._attributes[ATTR_LINE] = self._predictions[0]["lineName"]
+            self._attributes[ATTR_DESTINATION] = self._predictions[0]["destinationText"]
+            self._attributes[ATTR_DELAY] = self.__get_prediction_delay(
+                self._predictions[0]
+            )
             self._attributes[ATTR_ATTRIBUTION] = ATTRIBUTION
+
+    @staticmethod
+    def __get_prediction_time(prediction):
+        """Return prediction time derived from planned and actual time."""
+        if prediction["plannedTime"]:
+            return utc_from_timestamp(
+                int((prediction["actualTime"] or prediction["plannedTime"]) / 1000)
+            )
+
+    @staticmethod
+    def __get_prediction_delay(prediction):
+        """Return prediction delay derived from planned and actual time."""
+        if prediction["actualTime"] and prediction["plannedTime"]:
+            return int((prediction["actualTime"] - prediction["plannedTime"]) / 1000)
