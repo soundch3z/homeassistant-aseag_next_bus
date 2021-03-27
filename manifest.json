@@ -2,7 +2,8 @@
   "domain": "aseag_next_bus",
   "name": "ASEAG Next Bus Sensor",
   "version": "0.5.0",
-  "documentation": "",
+  "documentation": "https://github.com/davidorlea/homeassistant-aseag_next_bus",
+  "issue_tracker": "https://github.com/davidorlea/homeassistant-aseag_next_bus/issues",
   "dependencies": [],
   "codeowners": ["@davidorlea"],
   "requirements": []
