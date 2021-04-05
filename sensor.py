@@ -128,15 +128,14 @@ class AseagNextBusSensor(Entity):
             if not any(p["tripId"] in subl.values() for subl in predictions):
                 predictions.append(p)
 
-        for p in predictions:
-            if p["track"] != self._track or self.__get_prediction_time(p) < now:
-                predictions.remove(p)
+        predictions = [p for p in predictions if p["track"] == self._track]
+        predictions = [p for p in predictions if self.__get_prediction_time(p) >= now]
 
-        if predictions:
-            self._predictions = sorted(
-                predictions,
-                key=lambda prediction: self.__get_prediction_time(prediction),
-            )
+        self._predictions = sorted(
+            predictions, key=lambda p: self.__get_prediction_time(p)
+        )
+
+        if self._predictions:
             self._state = self.__get_prediction_time(self._predictions[0]).isoformat()
             self._attributes[ATTR_LINE] = self._predictions[0]["lineName"]
             self._attributes[ATTR_DESTINATION] = self._predictions[0]["destinationText"]
