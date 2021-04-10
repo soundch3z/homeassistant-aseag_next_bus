@@ -13,13 +13,19 @@ from homeassistant.util.dt import utc_from_timestamp, utcnow
 
 _LOGGER = logging.getLogger(__name__)
 
+MODES = {"single", "list"}
+
+CONF_MODE = "mode"
 CONF_STOP_ID = "stop_id"
 CONF_TRACK = "track"
 
-ATTR_LINE = "line"
-ATTR_DESTINATION = "destination"
 ATTR_DELAY = "delay"
+ATTR_DEPARTURE = "departure"
+ATTR_DESTINATION = "destination"
+ATTR_LINE = "line"
+ATTR_PREDICTIONS = "predictions"
 
+DEFAULT_MODE = "single"
 DEFAULT_NAME = "ASEAG Next Bus"
 
 ICON = "mdi:bus"
@@ -29,6 +35,9 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     {
         vol.Required(CONF_STOP_ID): cv.string,
         vol.Required(CONF_TRACK): cv.string,
+        vol.Optional(CONF_MODE, default=DEFAULT_MODE): vol.All(
+            cv.string, vol.In(MODES)
+        ),
         vol.Optional(CONF_NAME, default=DEFAULT_NAME): cv.string,
     }
 )
@@ -39,10 +48,11 @@ def setup_platform(_1, config, add_entities, _2):
 
     stop_id = config.get(CONF_STOP_ID)
     track = config.get(CONF_TRACK)
+    mode = config.get(CONF_MODE)
     name = config.get(CONF_NAME)
 
     api = AseagApi()
-    add_entities([AseagNextBusSensor(api, name, stop_id, track)])
+    add_entities([AseagNextBusSensor(api, name, mode, stop_id, track)])
 
 
 class AseagApi:
@@ -68,10 +78,11 @@ class AseagApi:
 class AseagNextBusSensor(Entity):
     """Representation of a ASEAG Next Bus Sensor."""
 
-    def __init__(self, api, name, stop_id, track):
+    def __init__(self, api, name, mode, stop_id, track):
         """Initialize the ASEAG Next Bus Sensor."""
         self._api = api
         self._name = name
+        self._mode = mode
         self._stop_id = stop_id
         self._track = track
         self._predictions = []
@@ -86,7 +97,8 @@ class AseagNextBusSensor(Entity):
     @property
     def device_class(self):
         """Return the device class of the ASEAG Next Bus Sensor."""
-        return DEVICE_CLASS_TIMESTAMP
+        if self._mode == "single":
+            return DEVICE_CLASS_TIMESTAMP
 
     @property
     def icon(self):
@@ -135,13 +147,26 @@ class AseagNextBusSensor(Entity):
             predictions, key=lambda p: self.__get_prediction_time(p)
         )
 
-        if self._predictions:
+        if self._predictions and self._mode == "list":
+            self._state = len(self._predictions)
+            self._attributes[ATTR_PREDICTIONS] = [
+                {
+                    ATTR_DEPARTURE: self.__get_prediction_time(p).isoformat(),
+                    ATTR_DELAY: self.__get_prediction_delay(p),
+                    ATTR_LINE: p["lineName"],
+                    ATTR_DESTINATION: p["destinationText"],
+                }
+                for p in self._predictions
+            ]
+            self._attributes[ATTR_ATTRIBUTION] = ATTRIBUTION
+
+        if self._predictions and self._mode == "single":
             self._state = self.__get_prediction_time(self._predictions[0]).isoformat()
-            self._attributes[ATTR_LINE] = self._predictions[0]["lineName"]
-            self._attributes[ATTR_DESTINATION] = self._predictions[0]["destinationText"]
             self._attributes[ATTR_DELAY] = self.__get_prediction_delay(
                 self._predictions[0]
             )
+            self._attributes[ATTR_LINE] = self._predictions[0]["lineName"]
+            self._attributes[ATTR_DESTINATION] = self._predictions[0]["destinationText"]
             self._attributes[ATTR_ATTRIBUTION] = ATTRIBUTION
 
     @staticmethod
