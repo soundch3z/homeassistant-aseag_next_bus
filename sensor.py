@@ -16,8 +16,11 @@ _LOGGER = logging.getLogger(__name__)
 MODES = {"single", "list"}
 
 CONF_MODE = "mode"
+CONF_TRACK_MODE = "track_mode"
 CONF_STOP_ID = "stop_id"
+CONF_TRACKS = "tracks"
 CONF_TRACK = "track"
+CONF_TRACK_OLD = "track"
 
 ATTR_DELAY = "delay"
 ATTR_DEPARTURE = "departure"
@@ -26,15 +29,19 @@ ATTR_LINE = "line"
 ATTR_PREDICTIONS = "predictions"
 
 DEFAULT_MODE = "single"
+DEFAULT_TRACK_MODE = "single"
 DEFAULT_NAME = "ASEAG Next Bus"
 
 ICON = "mdi:bus"
 ATTRIBUTION = "Data provided by ASEAG"
 
+TRACK_SCHEMA = vol.Schema({vol.Optional(CONF_TRACK): cv.string})
+
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     {
         vol.Required(CONF_STOP_ID): cv.string,
-        vol.Required(CONF_TRACK): cv.string,
+        vol.Optional(CONF_TRACKS, default={}): vol.All(cv.ensure_list, [TRACK_SCHEMA]),
+        vol.Optional(CONF_TRACK_OLD, default=""): cv.string,
         vol.Optional(CONF_MODE, default=DEFAULT_MODE): vol.All(
             cv.string, vol.In(MODES)
         ),
@@ -47,12 +54,13 @@ def setup_platform(_1, config, add_entities, _2):
     """Set up the sensor platform."""
 
     stop_id = config.get(CONF_STOP_ID)
-    track = config.get(CONF_TRACK)
+    tracks = config.get(CONF_TRACKS)
+    track_old = config.get(CONF_TRACK_OLD)
     mode = config.get(CONF_MODE)
     name = config.get(CONF_NAME)
 
     api = AseagApi()
-    add_entities([AseagNextBusSensor(api, name, mode, stop_id, track)])
+    add_entities([AseagNextBusSensor(api, name, mode, stop_id, tracks, track_old)])
 
 
 class AseagApi:
@@ -62,7 +70,7 @@ class AseagApi:
     def get_predictions(stop_id):
         """Get predictions matching a stop from the ASEAG API."""
         headers = {"User-Agent": "curl/7.64.1"}
-        resource = f"https://mova.aseag.de/mbroker/rest/areainformation/{stop_id}"
+        resource = f"https://mova.aseag.de/mbroker/rest/areainformation/publicTransport/sourceSystem/{stop_id}"
         try:
             response = requests.get(resource, headers=headers, verify=True, timeout=10)
             response.raise_for_status()
@@ -78,13 +86,14 @@ class AseagApi:
 class AseagNextBusSensor(Entity):
     """Representation of a ASEAG Next Bus Sensor."""
 
-    def __init__(self, api, name, mode, stop_id, track):
+    def __init__(self, api, name, mode, stop_id, tracks, track_old):
         """Initialize the ASEAG Next Bus Sensor."""
         self._api = api
         self._name = name
         self._mode = mode
         self._stop_id = stop_id
-        self._track = track
+        self._tracks = tracks
+        self._track_old = track_old
         self._predictions = []
         self._state = None
         self._attributes = {}
@@ -92,7 +101,14 @@ class AseagNextBusSensor(Entity):
     @property
     def name(self):
         """Return the name of the ASEAG Next Bus Sensor."""
-        return f"{self._name} {self._stop_id} {self._track}"
+        if self._track_old:
+            return f"{self._name} {self._stop_id} {self._track_old}"
+        track_string = ""
+        if len(self._tracks[0]) > 0:
+            for track in self._tracks:
+                track_string = track_string + track["track"] + " "
+            track_string.strip()
+        return f"{self._name} {self._stop_id} {track_string}"
 
     @property
     def device_class(self):
@@ -134,13 +150,23 @@ class AseagNextBusSensor(Entity):
                     "Erroneous result found when expecting list of predictions: %s", ex
                 )
         else:
-            _LOGGER.error("Empty result found when expecting list of predictions")
+            _LOGGER.error(
+                "Empty result found when expecting list of predictions"
+                + " "
+                + self._name
+            )
 
         for p in self._predictions:
             if not any(p["tripId"] in subl.values() for subl in predictions):
                 predictions.append(p)
 
-        predictions = [p for p in predictions if p["track"] == self._track]
+        if self._track_old:
+            predictions = [p for p in predictions if p["track"] == self._track_old]
+        elif len(self._tracks[0]) > 0:
+            predictions = [
+                p for p in predictions if {"track": p["track"]} in self._tracks
+            ]
+
         predictions = [p for p in predictions if self.__get_prediction_time(p) >= now]
 
         self._predictions = sorted(
