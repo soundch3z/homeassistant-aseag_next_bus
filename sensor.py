@@ -16,7 +16,6 @@ _LOGGER = logging.getLogger(__name__)
 MODES = {"single", "list"}
 
 CONF_MODE = "mode"
-CONF_TRACK_MODE = "track_mode"
 CONF_STOP_ID = "stop_id"
 CONF_TRACKS = "tracks"
 CONF_TRACK = "track"
@@ -29,7 +28,6 @@ ATTR_LINE = "line"
 ATTR_PREDICTIONS = "predictions"
 
 DEFAULT_MODE = "single"
-DEFAULT_TRACK_MODE = "single"
 DEFAULT_NAME = "ASEAG Next Bus"
 
 ICON = "mdi:bus"
@@ -150,11 +148,7 @@ class AseagNextBusSensor(Entity):
                     "Erroneous result found when expecting list of predictions: %s", ex
                 )
         else:
-            _LOGGER.error(
-                "Empty result found when expecting list of predictions"
-                + " "
-                + self._name
-            )
+            _LOGGER.error("Empty result found when expecting list of predictions")
 
         for p in self._predictions:
             if not any(p["tripId"] in subl.values() for subl in predictions):
