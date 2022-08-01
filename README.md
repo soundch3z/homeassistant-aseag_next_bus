@@ -16,7 +16,12 @@ sensor:
       - track: 'H.2'
   - platform: aseag_next_bus
     name: aseag_next_bus
-    mode: list
+    mode: single
     stop_id: 1001
     track: 'H.1'
+  - platform: aseag_next_bus
+    name: aseag_next_bus
+    mode: list
+    stop_id: 1001
 ~~~
+When no track is specified all tracks will be used
