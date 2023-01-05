@@ -1,0 +1,18 @@
+author:
+  email: soundch3z@users.noreply.github.com
+  homepage: https://github.com/soundch3z/homeassistant-aseag_next_bus
+  name: Soundch3z
+description: homeassistant-aseag_next_bus
+files:
+  - custom_components/homeassistant-aseag_next_bus/__init__.py
+  - custom_components/homeassistant-aseag_next_bus/sensor.py
+keywords:
+  - transport
+  - bus
+  - homeassistant
+  - home-assistant
+  - custom-component
+  - python
+license: MIT License
+name: sensor.homeassistant-aseag_next_bus
+type: component
