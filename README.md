@@ -2,7 +2,8 @@
 
 Custom [Home Assistant](https://www.home-assistant.io) component to retrieve next bus information from the ASEAG
 
-### Updating to version v0.8.0 has a breaking change: only stop_ids from the [OpenData portal](http://opendata.avv.de/) are supported now.
+-stop_ids from the [OpenData portal](http://opendata.avv.de/) are supported now.
+-compatible with HACS
 
 ## Configuration example:
 ~~~
